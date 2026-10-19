@@ -14,9 +14,9 @@
 //! root or project name against the tested directory and the fixture id
 //! that was actually planned or executed.
 //!
-//! Invalid UTF-8 paths are covered by a `#[cfg(unix)]` test at the bottom of
-//! this file; see its doc comment for why that case cannot be expressed on
-//! Windows.
+//! Invalid UTF-8 paths are covered by a `#[cfg(all(unix, not(target_os =
+//! "macos")))]` test at the bottom of this file; see its doc comment for
+//! why that case is constructible only on non-Apple Unix.
 
 mod support;
 
@@ -46,9 +46,10 @@ fn xdr_fixture(id: &str) -> String {
 /// configuration and one passing XDR fixture, the same fixture shape the
 /// existing `check` and `inspect` tests use.
 ///
-/// The leaf is an `OsStr` so the Unix-only non-UTF-8 test can reuse this
-/// helper, and every path is built with `Path::join` rather than string
-/// concatenation, so separators are never hardcoded.
+/// The leaf is an `OsStr` so the platform-gated non-UTF-8 test at the
+/// bottom of this file can reuse this helper, and every path is built with
+/// `Path::join` rather than string concatenation, so separators are never
+/// hardcoded.
 fn write_minimal_project(container: &TempProject, leaf: &OsStr) -> PathBuf {
     let root = container.path.join(leaf);
     let fixtures = root.join("fixtures");
@@ -208,7 +209,10 @@ fn symbol_paths_are_handled_by_inspect_and_check() {
 /// `support::run_in` takes `&[&str]`, which cannot express the byte
 /// sequences that Unix filesystems allow in path names; this variant can.
 /// Like the shared helper it never builds a shell command string.
-#[cfg(unix)]
+///
+/// Gated exactly like the non-UTF-8 test below — its only caller — so the
+/// helper does not become dead code on macOS, where that test cannot run.
+#[cfg(all(unix, not(target_os = "macos")))]
 fn run_os(cwd: &std::path::Path, args: &[&OsStr]) -> std::process::Output {
     std::process::Command::new(env!("CARGO_BIN_EXE_stellar-canary"))
         .args(args)
@@ -218,7 +222,7 @@ fn run_os(cwd: &std::path::Path, args: &[&OsStr]) -> std::process::Output {
 }
 
 /// Negative coverage for invalid UTF-8 byte sequences in paths (issue #498),
-/// Unix-only.
+/// non-Apple Unix only.
 ///
 /// The issue anticipated "a descriptive OsString encoding error". The actual
 /// contract is different and this test pins *it*, verified against the
@@ -229,11 +233,15 @@ fn run_os(cwd: &std::path::Path, args: &[&OsStr]) -> std::process::Output {
 /// appear as U+FFFD rather than as an error. No production change is needed
 /// or made; there is no UTF-8 conversion boundary that rejects such a path.
 ///
-/// This is `#[cfg(unix)]` because Windows paths are wide strings: an
-/// arbitrary invalid-UTF-8 byte sequence cannot be constructed as a Windows
-/// path in the first place, so a platform-independent assertion here would
-/// wrongly assume every filesystem path must be valid UTF-8.
-#[cfg(unix)]
+/// The gate is `#[cfg(all(unix, not(target_os = "macos")))]` for two
+/// platform reasons: Windows paths are wide strings, so an invalid-UTF-8
+/// byte sequence cannot be constructed as a Windows path in the first
+/// place; and macOS filesystems reject non-UTF-8 names outright — CI
+/// showed `create_dir_all` failing with `Illegal byte sequence (os error
+/// 92)` — so the fixture directory could not even be created there. Other
+/// Unix systems (Linux, the BSDs) treat filenames as arbitrary byte
+/// strings except NUL and `/`, which is where this case is constructible.
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn a_non_utf8_project_root_is_processed_and_rendered_lossily_on_unix() {
     use std::os::unix::ffi::OsStrExt;
